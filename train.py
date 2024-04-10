@@ -7,15 +7,17 @@ from tqdm import tqdm
 import math
 import logging
 import numpy as np
+from enum import Enum
 import random
-from model import Transformer, DeepSet
+from model import Transformer
 import wandb
 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
-
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="CLI for EquiScan training script")
     parser.add_argument("--batch_size", type=int, default=1)
+    parser.add_argument("--task", type=str, default="simple")
+    parser.add_argument("--p", type=str, default="64")
     parser.add_argument("--val_batch_size", type=int, default=64)
     parser.add_argument("--gradient_clip", type=float, default=5.0)
     parser.add_argument("--lr", type=float, default=3e-5)
@@ -97,32 +99,34 @@ if __name__ == "__main__":
     wandb_config = vars(args).copy()
     del wandb_config["log"]
     logging.info(f"Running EquivScan with config: {wandb_config}")
+
+    if args.task == "simple":
+        train_path = f"./data/simple_split/size_variations/tasks_train_simple_p{args.p}.txt"
+        val_path = f"./data/simple_split/size_variations/tasks_test_simple_p{args.p}.txt"
+    elif args.task == "length":
+        del wandb_config["p"]
+        train_path = f"./data/length_split/tasks_train_length.txt"
+        val_path = f"./data/length_split/tasks_test_length.txt"
+
     if args.log:
         wandb.init(project="equiscan", config=wandb_config, entity="sondrewo")
-
-    train_data = ScanData("./data/simple_split/size_variations/tasks_train_simple_p64.txt")
-    val_data = ScanData("./data/simple_split/size_variations/tasks_test_simple_p64.txt", input_language=train_data.input_language, output_language=train_data.output_language)
+    train_data = ScanData(train_path)
+    val_data = ScanData(val_path, input_language=train_data.input_language, output_language=train_data.output_language)
     train_loader = DataLoader(train_data, batch_size=args.batch_size, collate_fn=CollateFunctor(), shuffle=True)
     val_loader = DataLoader(val_data, batch_size=args.val_batch_size, collate_fn=CollateFunctor())
     EPOCHS = args.steps // len(train_loader)
     device_max_steps = EPOCHS * len(train_loader)
-
 
     logging.info(f"TRAIN: Number of words in input language: {train_data.input_language.n_words}")
     logging.info(f"TRAIN: Number of words in output language: {train_data.output_language.n_words}")
     logging.info(f"VAL: Number of words in input language: {val_data.input_language.n_words}")
     logging.info(f"VAL: Number of words in output language: {val_data.output_language.n_words}")
 
-    if args.deepset:
-        model = DeepSet(128, 9, 512)
-
-    else:
-        model = MyTransformer(num_encoder_layers=args.layers, num_decoder_layers=args.layers, hidden_size=args.hidden_size, num_heads=args.heads, dropout=args.dropout).to(device)
+    model = MyTransformer(num_encoder_layers=args.layers, num_decoder_layers=args.layers, hidden_size=args.hidden_size, num_heads=args.heads, dropout=args.dropout).to(device)
     params = sum([p.numel() for p in model.parameters()])
     criterion = nn.CrossEntropyLoss(ignore_index=0)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     scheduler = cosine_schedule_with_warmup(optimizer, int(device_max_steps * args.warmup_proportion), device_max_steps, 0.1)
-    generator = GreedySearch(model, train_data.output_language.index2word)
 
     logging.info(f"Model parameter count: {params}")
     logging.info(f"Total steps: {device_max_steps}")
@@ -142,12 +146,7 @@ if __name__ == "__main__":
             source_mask = source_mask.to(device)
             target_ids = target_ids.to(device)
             target_mask = target_mask.to(device)
-            if args.deepset:
-                out = model(source_ids)
-            else:
-                out = model(source_ids, source_mask, target_ids[:, :-1], target_mask[:, :-1])
-            print(out.shape)
-            exit()
+            out = model(source_ids, source_mask, target_ids[:, :-1], target_mask[:, :-1])
             loss = criterion(out.transpose(-2, -1), target_ids[:, 1:])
             train_loss += loss.item()
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.gradient_clip)
@@ -173,10 +172,7 @@ if __name__ == "__main__":
                 source_mask = source_mask.to(device)
                 target_ids = target_ids.to(device)
                 target_mask = target_mask.to(device)
-                if args.deepset:
-                    out = model(source_ids)
-                else:
-                    out = model(source_ids, source_mask, target_ids[:, :-1], target_mask[:, :-1])
+                out = model(source_ids, source_mask, target_ids[:, :-1], target_mask[:, :-1])
                 loss = criterion(out.transpose(-2, -1), target_ids[:, 1:])
                 val_loss += loss.item()
                 preds = torch.argmax(out, dim=-1)
