@@ -1,18 +1,20 @@
 import torch
-import numpy as np
 from torch.utils.data import Dataset
 import random
 import torch.nn.functional as F
 
 PAD_TOKEN = 0
+SOS_TOKEN = 1
+EOS_TOKEN = 2
+
 
 class Lang:
     def __init__(self, name):
         self.name = name
         self.word2index = {}
         self.word2count = {}
-        self.index2word = {0: "PAD"}
-        self.n_words = 1  # Count SOS and EOS
+        self.index2word = {0: "PAD", 1: "SOS", 2: "EOS"}
+        self.n_words = 3  # Count PAD, SOS and EOS
 
     def addSentence(self, sentence):
         for word in sentence.split(' '):
@@ -60,8 +62,8 @@ class ScanData(Dataset):
 
     def __getitem__(self, idx):
         x, y = self.pairs[idx]
-        input_tensor = self.indexesFromSentence(self.input_language, x)
-        output_tensor = self.indexesFromSentence(self.output_language, y)
+        input_tensor = self.indexesFromSentence(self.input_language, x) + [EOS_TOKEN]
+        output_tensor = [SOS_TOKEN] + self.indexesFromSentence(self.output_language, y) + [EOS_TOKEN]
         return torch.tensor(input_tensor), torch.tensor(output_tensor), x, y
 
 
@@ -78,16 +80,16 @@ class CollateFunctor:
     def collate_sentences(self, sentences: list):
         lengths = [sentence.size(0) for sentence in sentences]
         max_length = max(lengths)
-
+        if max_length == 1:
+            max_length += 1
         subword_ids = torch.stack([
             F.pad(sentence, (0, max_length - length), value=self.pad_id)
             for length, sentence in zip(lengths, sentences)
         ])
         attention_mask = subword_ids == self.pad_id
-
         return subword_ids, attention_mask
-    
-    
+
+
 if __name__ == "__main__":
     train_data = ScanData("./data/simple_split/tasks_train_simple.txt")
     val_data = ScanData("./data/simple_split/tasks_test_simple.txt", input_language=train_data.input_language, output_language=train_data.output_language)
@@ -96,6 +98,3 @@ if __name__ == "__main__":
     print(random_pair)
     print(v_random_pair)
     print(val_data[1])
-
-
-

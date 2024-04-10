@@ -3,7 +3,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+
 
 class Transformer(nn.Module):
     def __init__(self, num_encoder_layers, num_decoder_layers, hidden_size, num_heads, dropout):
@@ -52,7 +54,7 @@ class Decoder(nn.Module):
 
     # TODO: should return an [query_length, key_length] BoolTensor
     def get_attention_mask(self, query_length: int, key_length: int, device):
-        return torch.triu(torch.full((query_length, key_length), True, dtype=torch.bool, device=device),diagonal=1)
+        return torch.triu(torch.full((query_length, key_length), True, dtype=torch.bool, device=device), diagonal=1)
 
 
 class EncoderLayer(nn.Module):
