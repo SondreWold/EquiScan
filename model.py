@@ -18,6 +18,10 @@ class Transformer(nn.Module):
         output = self.decoder(target, target_padding_mask, memory, source_padding_mask)
         return output
 
+    def encode_source(self, source, source_padding_mask):
+        return self.encoder(source, source_padding_mask)
+
+
 
 class Encoder(nn.Module):
     def __init__(self, num_layers, hidden_size, num_heads, dropout):

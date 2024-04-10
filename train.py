@@ -9,23 +9,25 @@ import logging
 import numpy as np
 import random
 from model import Transformer
+import wandb
 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="CLI for EquiScan training script")
     parser.add_argument("--batch_size", type=int, default=1)
-    parser.add_argument("--val_batch_size", type=int, default=32)
+    parser.add_argument("--val_batch_size", type=int, default=64)
     parser.add_argument("--gradient_clip", type=float, default=5.0)
-    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--lr", type=float, default=3e-5)
     parser.add_argument("--hidden_size", type=int, default=128)
     parser.add_argument("--layers", type=int, default=3)
     parser.add_argument("--heads", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--dropout", type=float, default=0.1)
-    parser.add_argument("--warmup_proportion", type=float, default=0.6)
+    parser.add_argument("--warmup_proportion", type=float, default=0.06)
     parser.add_argument("--steps", type=int, default=100000)
+    parser.add_argument("--log", action='store_true', help="Trigger WANDB logging")
+    return parser.parse_args()
 
 
 def set_seed(seed: int) -> None:
@@ -61,6 +63,15 @@ class MyTransformer(nn.Module):
         out = self.projection(out)
         return out
 
+    def encode_source(self, source, source_padding_mask):
+        encoded = self.emb_in(source)
+        return self.transformer_model.encode_source(encoded, source_padding_mask)
+
+    def decode_step(self, memory, source_padding_mask, target, target_padding_mask):
+        encoded = self.emb_out(target)
+        decoded = self.transformer_model.decoder(encoded, target_padding_mask, memory, source_padding_mask)
+        return self.projection(decoded)
+
 
 def cosine_schedule_with_warmup(optimizer, num_warmup_steps: int, num_training_steps: int, min_factor: float):
     def lr_lambda(current_step):
@@ -70,6 +81,42 @@ def cosine_schedule_with_warmup(optimizer, num_warmup_steps: int, num_training_s
         lr = max(min_factor, min_factor + (1 - min_factor) * 0.5 * (1.0 + math.cos(math.pi * progress)))
         return lr
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+
+
+class GreedySearch:
+    def __init__(self, model, output_vocab, max_length=128):
+        self.model = model
+        self.output_vocab = output_vocab
+        self.max_length = max_length
+
+        self.pad_id = torch.tensor(0)
+        self.sos_id = torch.tensor(1)
+        self.eos_id = torch.tensor(2)
+
+    @torch.no_grad()
+    def __call__(self, source, source_mask):
+        source_encoding = self.model.encode_source(source, source_mask)
+        target = torch.full([source_encoding.size(0), 1], fill_value=self.sos_id, device=source.device)
+        target_padding_mask = self.model.transformer_model.decoder.get_attention_mask(target.shape[1], target.shape[1], device=source.device)
+        stop = torch.zeros(target.size(0), dtype=torch.bool, device=target.device)
+
+        for _ in range(self.max_length):
+            prediction = self.model.decode_step(source_encoding, source_mask, target, target_padding_mask)
+            prediction = torch.where(stop, self.pad_id, prediction.argmax(-1))
+            stop |= prediction[0] == self.eos_id
+            target = torch.cat([target, prediction], dim=1)
+            target_padding_mask = self.model.transformer_model.decoder.get_attention_mask(target.shape[1], target.shape[1], device=source.device)
+            print(target.shape)
+            print(target_padding_mask.shape)
+
+            if stop.all():
+                break
+
+        sentences = []
+        for b in target.tolist():
+            sentence = [self.output_vocab[t] for t in b]
+            sentences.append(sentence)
+        return sentences
 
 
 if __name__ == "__main__":
@@ -82,12 +129,19 @@ if __name__ == "__main__":
     set_seed(args.seed)
     logging.info("-----EquiScan------")
 
+    wandb_config = vars(args).copy()
+    del wandb_config["log"]
+    logging.info(f"Running EquivScan with config: {wandb_config}")
+    if args.log:
+        wandb.init(project="equiscan", config=wandb_config, entity="sondrewo")
+
     train_data = ScanData("./data/simple_split/size_variations/tasks_train_simple_p64.txt")
     val_data = ScanData("./data/simple_split/size_variations/tasks_test_simple_p64.txt", input_language=train_data.input_language, output_language=train_data.output_language)
     train_loader = DataLoader(train_data, batch_size=args.batch_size, collate_fn=CollateFunctor(), shuffle=True)
     val_loader = DataLoader(val_data, batch_size=args.val_batch_size, collate_fn=CollateFunctor())
     EPOCHS = args.steps // len(train_loader)
     device_max_steps = EPOCHS * len(train_loader)
+
 
     logging.info(f"TRAIN: Number of words in input language: {train_data.input_language.n_words}")
     logging.info(f"TRAIN: Number of words in output language: {train_data.output_language.n_words}")
@@ -99,6 +153,7 @@ if __name__ == "__main__":
     criterion = nn.CrossEntropyLoss(ignore_index=0)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     scheduler = cosine_schedule_with_warmup(optimizer, int(device_max_steps * args.warmup_proportion), device_max_steps, 0.1)
+    generator = GreedySearch(model, train_data.output_language.index2word)
 
     logging.info(f"Model parameter count: {params}")
     logging.info(f"Total steps: {device_max_steps}")
@@ -125,6 +180,8 @@ if __name__ == "__main__":
             loss.backward()
             optimizer.step()
             scheduler.step()
+            if args.log:
+                wandb.log({"learning_rate_decay": optimizer.param_groups[0]["lr"], "train_loss": loss.item()})
             with torch.no_grad():
                 preds = torch.argmax(out, dim=-1)
                 gold = target_ids[:, 1:].flatten()
@@ -158,3 +215,5 @@ if __name__ == "__main__":
         epoch_val_loss = val_loss / len(val_loader)
         val_accuracy = val_corrects/val_n
         logging.info(f"Epoch: {epoch}, train loss: {epoch_train_loss}, train accuracy: {train_accuracy}, val loss: {epoch_val_loss}, val accuracy: {val_accuracy}")
+        if args.log:
+            wandb.log({"val_loss": epoch_val_loss, "val_acc": val_accuracy, "train_acc": train_accuracy})
