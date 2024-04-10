@@ -56,7 +56,6 @@ class Decoder(nn.Module):
 
         return x
 
-    # TODO: should return an [query_length, key_length] BoolTensor
     def get_attention_mask(self, query_length: int, key_length: int, device):
         return torch.triu(torch.full((query_length, key_length), True, dtype=torch.bool, device=device), diagonal=1)
 
@@ -181,7 +180,6 @@ class MultiHeadAttention(nn.Module):
                 key_padding_mask.view(batch_size, 1, 1, key_len), value=float("-inf")
             )
         if attention_mask is not None:
-            # NOTE: this is where the attention_mask is used
             attention_weights = attention_weights.masked_fill(
                 attention_mask.view(1, 1, query_len, key_len), value=float("-inf")
             )
@@ -198,7 +196,6 @@ class MultiHeadAttention(nn.Module):
 class PositionalEncoding(nn.Module):
     def __init__(self, hidden_size, max_len=256):
         super(PositionalEncoding, self).__init__()
-
         pe = torch.zeros(max_len, hidden_size)  # shape: [T, D]
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)  # shape: [T, 1]
         div_term = torch.exp(torch.arange(0, hidden_size, 2).float() * (-math.log(10000.0) / hidden_size))  # shape: [D / 2]
