@@ -24,9 +24,12 @@ This gives a model of approximately 850 000 parameters, roughly the same as the 
 
 ## Results
 
+<p align="center">
+  <img width="500" height="350" src="./figs/simple.png">
+  <br>
+  <em>Results of the "simple" task for different dataset sizes..</em>
+</p>
 
-
-![Results of the "simple" task for different dataset sizes.](./figs/simple.pdf)
 
 
 
