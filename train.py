@@ -114,7 +114,7 @@ if __name__ == "__main__":
     val_data = ScanData(val_path, input_language=train_data.input_language, output_language=train_data.output_language)
     train_loader = DataLoader(train_data, batch_size=args.batch_size, collate_fn=CollateFunctor(), shuffle=True)
     val_loader = DataLoader(val_data, batch_size=args.val_batch_size, collate_fn=CollateFunctor())
-    EPOCHS = args.steps // len(train_loader)
+    EPOCHS = 5
     device_max_steps = EPOCHS * len(train_loader)
 
     logging.info(f"TRAIN: Number of words in input language: {train_data.input_language.n_words}")
