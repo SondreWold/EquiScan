@@ -12,7 +12,7 @@ The data can be downloaded by running:
 
 Models were tuned with an informal hyperparameter search on the "simple" task. In the paper, it seem like they use a batch size of 1 for training, so this is also the default in this repository. The best configuration was:
 
-| hyperparameter    | Value  |
+| Hyperparameter    | Value  |
 | ----------------- | ------ |
 | `lr`              | 0.0003 |
 | `layers`          | 2      |
