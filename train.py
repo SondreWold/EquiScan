@@ -8,7 +8,7 @@ import math
 import logging
 import numpy as np
 import random
-from model import Transformer
+from model import Transformer, DeepSet
 import wandb
 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
@@ -27,6 +27,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--warmup_proportion", type=float, default=0.06)
     parser.add_argument("--steps", type=int, default=100000)
     parser.add_argument("--log", action='store_true', help="Trigger WANDB logging")
+    parser.add_argument("--deepset", action='store_true', help="Use DeepSet method")
     return parser.parse_args()
 
 
@@ -83,42 +84,6 @@ def cosine_schedule_with_warmup(optimizer, num_warmup_steps: int, num_training_s
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
 
-class GreedySearch:
-    def __init__(self, model, output_vocab, max_length=128):
-        self.model = model
-        self.output_vocab = output_vocab
-        self.max_length = max_length
-
-        self.pad_id = torch.tensor(0)
-        self.sos_id = torch.tensor(1)
-        self.eos_id = torch.tensor(2)
-
-    @torch.no_grad()
-    def __call__(self, source, source_mask):
-        source_encoding = self.model.encode_source(source, source_mask)
-        target = torch.full([source_encoding.size(0), 1], fill_value=self.sos_id, device=source.device)
-        target_padding_mask = self.model.transformer_model.decoder.get_attention_mask(target.shape[1], target.shape[1], device=source.device)
-        stop = torch.zeros(target.size(0), dtype=torch.bool, device=target.device)
-
-        for _ in range(self.max_length):
-            prediction = self.model.decode_step(source_encoding, source_mask, target, target_padding_mask)
-            prediction = torch.where(stop, self.pad_id, prediction.argmax(-1))
-            stop |= prediction[0] == self.eos_id
-            target = torch.cat([target, prediction], dim=1)
-            target_padding_mask = self.model.transformer_model.decoder.get_attention_mask(target.shape[1], target.shape[1], device=source.device)
-            print(target.shape)
-            print(target_padding_mask.shape)
-
-            if stop.all():
-                break
-
-        sentences = []
-        for b in target.tolist():
-            sentence = [self.output_vocab[t] for t in b]
-            sentences.append(sentence)
-        return sentences
-
-
 if __name__ == "__main__":
     args = parse_args()
     logging.basicConfig(
@@ -148,7 +113,11 @@ if __name__ == "__main__":
     logging.info(f"VAL: Number of words in input language: {val_data.input_language.n_words}")
     logging.info(f"VAL: Number of words in output language: {val_data.output_language.n_words}")
 
-    model = MyTransformer(num_encoder_layers=args.layers, num_decoder_layers=args.layers, hidden_size=args.hidden_size, num_heads=args.heads, dropout=args.dropout).to(device)
+    if args.deepset:
+        model = DeepSet(128, 9, 512)
+
+    else:
+        model = MyTransformer(num_encoder_layers=args.layers, num_decoder_layers=args.layers, hidden_size=args.hidden_size, num_heads=args.heads, dropout=args.dropout).to(device)
     params = sum([p.numel() for p in model.parameters()])
     criterion = nn.CrossEntropyLoss(ignore_index=0)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
@@ -173,7 +142,12 @@ if __name__ == "__main__":
             source_mask = source_mask.to(device)
             target_ids = target_ids.to(device)
             target_mask = target_mask.to(device)
-            out = model(source_ids, source_mask, target_ids[:, :-1], target_mask[:, :-1])
+            if args.deepset:
+                out = model(source_ids)
+            else:
+                out = model(source_ids, source_mask, target_ids[:, :-1], target_mask[:, :-1])
+            print(out.shape)
+            exit()
             loss = criterion(out.transpose(-2, -1), target_ids[:, 1:])
             train_loss += loss.item()
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.gradient_clip)
@@ -199,7 +173,10 @@ if __name__ == "__main__":
                 source_mask = source_mask.to(device)
                 target_ids = target_ids.to(device)
                 target_mask = target_mask.to(device)
-                out = model(source_ids, source_mask, target_ids[:, :-1], target_mask[:, :-1])
+                if args.deepset:
+                    out = model(source_ids)
+                else:
+                    out = model(source_ids, source_mask, target_ids[:, :-1], target_mask[:, :-1])
                 loss = criterion(out.transpose(-2, -1), target_ids[:, 1:])
                 val_loss += loss.item()
                 preds = torch.argmax(out, dim=-1)
