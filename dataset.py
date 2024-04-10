@@ -1,8 +1,7 @@
-import torch
 from torch.utils.data import Dataset
 import random
+import torch
 import torch.nn.functional as F
-
 PAD_TOKEN = 0
 SOS_TOKEN = 1
 EOS_TOKEN = 2

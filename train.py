@@ -1,15 +1,15 @@
-import argparse
-import torch
-from torch.utils.data import DataLoader
-import torch.nn as nn
 from dataset import ScanData, CollateFunctor
-from tqdm import tqdm
-import math
-import logging
-import numpy as np
 from enum import Enum
-import random
 from model import Transformer
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+import argparse
+import logging
+import math
+import numpy as np
+import random
+import torch
+import torch.nn as nn
 import wandb
 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
