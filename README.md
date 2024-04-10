@@ -30,6 +30,7 @@ This gives a model of approximately 850 000 parameters, roughly the same as the 
   <em>Results of the "simple" task for different dataset sizes..</em>
 </p>
 
+For the length productivity task, the model got a 82.27% accuracy.
 
 
 
