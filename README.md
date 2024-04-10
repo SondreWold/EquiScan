@@ -26,7 +26,7 @@ This gives a model of approximately 850 000 parameters, roughly the same as the 
 
 
 
-![Results of the "simple" task for different dataset sizes.](.figs/simple.pdf)
+![Results of the "simple" task for different dataset sizes.](./figs/simple.pdf)
 
 
 
